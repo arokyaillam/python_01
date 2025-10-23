@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Market Data Stream</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        @keyframes pulse-green {
+            0%, 100% { background-color: rgb(34 197 94 / 0.2); }
+            50% { background-color: rgb(34 197 94 / 0.4); }
+        }
+        @keyframes pulse-red {
+            0%, 100% { background-color: rgb(239 68 68 / 0.2); }
+            50% { background-color: rgb(239 68 68 / 0.4); }
+        }
+        .price-up { animation: pulse-green 0.5s ease-in-out; }
+        .price-down { animation: pulse-red 0.5s ease-in-out; }
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <!-- Header -->
+    <header class="gradient-bg shadow-lg">
+        <div class="container mx-auto px-6 py-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-3xl font-bold">📊 Live Market Data</h1>
+                    <p class="text-purple-200 mt-1">Real-time streaming from Upstox</p>
+                </div>
+                <div class="flex items-center gap-4">
+                    <div class="flex items-center gap-2">
+                        <div id="status-indicator" class="w-3 h-3 rounded-full bg-gray-400"></div>
+                        <span id="status-text" class="text-sm">Connecting...</span>
+                    </div>
+                    <div id="market-status-banner" class="hidden px-4 py-2 rounded-lg bg-gray-700 border border-gray-600">
+                        <span id="market-status-text" class="text-sm font-semibold">Market Status</span>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-sm text-purple-200">Connected Clients</div>
+                        <div id="client-count" class="text-2xl font-bold">0</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-6 py-8">
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-gray-800 rounded-lg p-6 shadow-xl border border-gray-700">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400 text-sm">Messages Received</p>
+                        <p id="msg-count" class="text-3xl font-bold mt-2">0</p>
+                    </div>
+                    <div class="text-5xl">📨</div>
+                </div>
+            </div>
+            
+            <div class="bg-gray-800 rounded-lg p-6 shadow-xl border border-gray-700">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400 text-sm">Instruments</p>
+                        <p id="instrument-count" class="text-3xl font-bold mt-2">0</p>
+                    </div>
+                    <div class="text-5xl">📈</div>
+                </div>
+            </div>
+            
+            <div class="bg-gray-800 rounded-lg p-6 shadow-xl border border-gray-700">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400 text-sm">Last Update</p>
+                        <p id="last-update" class="text-lg font-bold mt-2">--:--:--</p>
+                    </div>
+                    <div class="text-5xl">⏱️</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Market Data Cards -->
+        <div id="market-cards" class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <!-- Market cards will be inserted here -->
+        </div>
+
+        <!-- Live Feed -->
+        <div class="bg-gray-800 rounded-lg shadow-xl border border-gray-700">
+            <div class="px-6 py-4 border-b border-gray-700">
+                <h2 class="text-xl font-bold flex items-center gap-2">
+                    <span>🔴</span> Live Feed
+                    <button onclick="clearLogs()" class="ml-auto text-sm bg-red-600 hover:bg-red-700 px-3 py-1 rounded">
+                        Clear
+                    </button>
+                </h2>
+            </div>
+            <div id="live-feed" class="p-6 max-h-96 overflow-y-auto font-mono text-sm space-y-2">
+                <div class="text-gray-500">Waiting for market data...</div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // State
+        let eventSource = null;
+        let messageCount = 0;
+        let instruments = new Map();
+        const maxLogs = 50;
+
+        // Initialize EventSource
+        function initSSE() {
+            eventSource = new EventSource('/stream');
+            
+            eventSource.onopen = () => {
+                updateStatus('connected');
+                console.log('✅ SSE Connected');
+            };
+            
+            eventSource.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleMarketData(data);
+                } catch (error) {
+                    console.error('Parse error:', error);
+                }
+            };
+            
+            eventSource.onerror = () => {
+                updateStatus('disconnected');
+                console.error('❌ SSE Error');
+                setTimeout(initSSE, 5000); // Reconnect after 5s
+            };
+        }
+
+        // Handle incoming market data
+        function handleMarketData(data) {
+            messageCount++;
+            document.getElementById('msg-count').textContent = messageCount;
+            document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+            
+            // Handle connection message
+            if (data.type === 'connection') {
+                addLog('System', `Connected: ${data.message}`, 'text-green-400');
+                return;
+            }
+            
+            // Handle market info (market status)
+            if (data.type === 'market_info' || data.marketInfo) {
+                handleMarketInfo(data);
+                return;
+            }
+            
+            // Handle feed data
+            if (data.feeds) {
+                Object.entries(data.feeds).forEach(([key, feed]) => {
+                    updateInstrument(key, feed);
+                });
+                document.getElementById('instrument-count').textContent = instruments.size;
+            }
+            
+            // Add to live feed
+            addLog('Feed', JSON.stringify(data, null, 2).substring(0, 200) + '...', 'text-blue-400');
+        }
+
+        // Handle market info/status
+        function handleMarketInfo(data) {
+            const marketInfo = data.marketInfo || {};
+            const segments = marketInfo.segmentStatus || {};
+            
+            // Show market status
+            const nseStatus = segments['NSE_EQ'] || segments['NSE_INDEX'] || 'UNKNOWN';
+            const statusText = formatMarketStatus(nseStatus);
+            
+            addLog('Market', `Status: ${statusText}`, getStatusColor(nseStatus));
+        }
+
+        // Format market status
+        function formatMarketStatus(status) {
+            const statusMap = {
+                'PRE_OPEN_START': '🟡 Pre-Open Started',
+                'PRE_OPEN_END': '🟡 Pre-Open Ended',
+                'NORMAL_OPEN': '🟢 Market Open',
+                'NORMAL_CLOSE': '🔴 Market Closed',
+                'CLOSING_START': '🟠 Closing Started',
+                'CLOSING_END': '🔴 Market Closed'
+            };
+            return statusMap[status] || status;
+        }
+
+        // Get status color
+        function getStatusColor(status) {
+            if (status === 'NORMAL_OPEN') return 'text-green-400';
+            if (status.includes('CLOSE') || status.includes('END')) return 'text-red-400';
+            return 'text-yellow-400';
+        }
+
+        // Update instrument card
+        function updateInstrument(key, feed) {
+            const instrumentName = key.split('|')[1] || key;
+            
+            let ltpData = null;
+            if (feed.ltpc) {
+                ltpData = feed.ltpc;
+            } else if (feed.fullFeed?.indexFf?.ltpc) {
+                ltpData = feed.fullFeed.indexFf.ltpc;
+            } else if (feed.fullFeed?.marketFf?.ltpc) {
+                ltpData = feed.fullFeed.marketFf.ltpc;
+            }
+            
+            if (!ltpData) return;
+            
+            const prevData = instruments.get(key);
+            const currentLtp = ltpData.ltp || 0;
+            const prevLtp = prevData?.ltp || currentLtp;
+            const change = currentLtp - prevLtp;
+            const changePercent = prevLtp ? ((change / prevLtp) * 100).toFixed(2) : 0;
+            
+            instruments.set(key, {
+                name: instrumentName,
+                ltp: currentLtp,
+                cp: ltpData.cp || 0,
+                change: change,
+                changePercent: changePercent,
+                volume: ltpData.ltq || 0,
+                timestamp: ltpData.ltt || Date.now()
+            });
+            
+            renderInstrumentCards();
+        }
+
+        // Render instrument cards
+        function renderInstrumentCards() {
+            const container = document.getElementById('market-cards');
+            container.innerHTML = '';
+            
+            instruments.forEach((data, key) => {
+                const isPositive = data.change >= 0;
+                const changeClass = isPositive ? 'text-green-400' : 'text-red-400';
+                const bgClass = isPositive ? 'price-up' : 'price-down';
+                
+                const card = `
+                    <div class="bg-gray-800 rounded-lg p-6 shadow-xl border border-gray-700 ${bgClass}">
+                        <div class="flex items-start justify-between mb-4">
+                            <div>
+                                <h3 class="text-2xl font-bold">${data.name}</h3>
+                                <p class="text-gray-400 text-sm">${key}</p>
+                            </div>
+                            <span class="${changeClass} text-2xl font-bold">
+                                ${isPositive ? '▲' : '▼'}
+                            </span>
+                        </div>
+                        
+                        <div class="space-y-3">
+                            <div>
+                                <div class="text-4xl font-bold">${data.ltp.toFixed(2)}</div>
+                                <div class="${changeClass} text-lg font-semibold mt-1">
+                                    ${isPositive ? '+' : ''}${data.change.toFixed(2)} 
+                                    (${isPositive ? '+' : ''}${data.changePercent}%)
+                                </div>
+                            </div>
+                            
+                            <div class="grid grid-cols-2 gap-4 pt-4 border-t border-gray-700">
+                                <div>
+                                    <div class="text-gray-400 text-sm">Close Price</div>
+                                    <div class="text-lg font-semibold">${data.cp.toFixed(2)}</div>
+                                </div>
+                                <div>
+                                    <div class="text-gray-400 text-sm">Volume</div>
+                                    <div class="text-lg font-semibold">${data.volume.toLocaleString()}</div>
+                                </div>
+                            </div>
+                            
+                            <div class="text-xs text-gray-500 pt-2">
+                                Last updated: ${new Date(data.timestamp).toLocaleTimeString()}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                container.innerHTML += card;
+            });
+        }
+
+        // Add log entry
+        function addLog(source, message, colorClass = 'text-gray-300') {
+            const feed = document.getElementById('live-feed');
+            const entry = document.createElement('div');
+            entry.className = `${colorClass} text-xs`;
+            entry.innerHTML = `<span class="text-gray-500">[${new Date().toLocaleTimeString()}]</span> <span class="font-bold">${source}:</span> ${message}`;
+            
+            if (feed.children.length >= maxLogs) {
+                feed.removeChild(feed.firstChild);
+            }
+            
+            feed.appendChild(entry);
+            feed.scrollTop = feed.scrollHeight;
+        }
+
+        // Clear logs
+        function clearLogs() {
+            document.getElementById('live-feed').innerHTML = '<div class="text-gray-500">Logs cleared...</div>';
+        }
+
+        // Update connection status
+        function updateStatus(status) {
+            const indicator = document.getElementById('status-indicator');
+            const text = document.getElementById('status-text');
+            
+            if (status === 'connected') {
+                indicator.className = 'w-3 h-3 rounded-full bg-green-500 animate-pulse';
+                text.textContent = 'Connected';
+            } else {
+                indicator.className = 'w-3 h-3 rounded-full bg-red-500';
+                text.textContent = 'Disconnected';
+            }
+        }
+
+        // Fetch health status
+        async function updateHealth() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                document.getElementById('client-count').textContent = data.clients;
+            } catch (error) {
+                console.error('Health check failed:', error);
+            }
+        }
+
+        // Initialize
+        initSSE();
+        updateHealth();
+    </script>
+</body>
+</html>
