@@ -13,13 +13,14 @@ from datetime import datetime
 from collections import deque
 from flask import Flask, Response, render_template, jsonify
 from flask_cors import CORS
+from dotenv import load_dotenv  
 
 # Import detector
 from bigmove_detector import BigMoveDetector
-
+load_dotenv()
 # Configuration
 USE_MOCK = os.getenv('USE_MOCK', 'False').lower() == 'true'
-ACCESS_TOKEN = os.getenv('ACCESS_TOKEN', 'eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI3QkJSUkUiLCJqdGkiOiI2OGY5OTNiMDhiMTc1OTQ0MjIwYzU2N2IiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzYxMTg2NzM2LCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3NjEyNTY4MDB9.aMzR2EIN8MzCxeYAAjdsQ4PgmatqgmOqQ7vkPA4K2_A')
+ACCESS_TOKEN = os.getenv('ACCESS_TOKEN', '')
 DEFAULT_INSTRUMENTS = [
     "NSE_FO|59022",  # Options for Greeks
     "NSE_FO|59023",
