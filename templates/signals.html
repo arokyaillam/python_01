@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Trading Signals</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse-buy {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+            50% { box-shadow: 0 0 0 15px rgba(34, 197, 94, 0); }
+        }
+        @keyframes pulse-sell {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            50% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
+        }
+        .signal-buy { animation: pulse-buy 1.5s infinite; }
+        .signal-sell { animation: pulse-sell 1.5s infinite; }
+        .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .gauge-bg {
+            background: conic-gradient(
+                from 0deg,
+                #ef4444 0deg 90deg,
+                #f59e0b 90deg 180deg,
+                #10b981 180deg 270deg,
+                #3b82f6 270deg 360deg
+            );
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <!-- Header -->
+    <header class="gradient-bg shadow-lg">
+        <div class="container mx-auto px-6 py-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-3xl font-bold">⚡ Real-Time Trading Signals</h1>
+                    <p class="text-purple-200 mt-1">Live Order Flow & Entry/Exit Analysis</p>
+                </div>
+                <div class="flex items-center gap-4">
+                    <a href="/" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition">
+                        📊 Big Move Dashboard
+                    </a>
+                    <div class="flex items-center gap-2">
+                        <div id="status-indicator" class="w-3 h-3 rounded-full bg-gray-400"></div>
+                        <span id="status-text" class="text-sm">Connecting...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-6 py-8">
+        <!-- Active Signals Banner -->
+        <div id="active-signals-banner" class="hidden mb-8 p-6 rounded-lg border-2 animate-pulse">
+            <div class="flex items-center justify-between">
+                <div>
+                    <div class="text-2xl font-bold" id="signal-action">BUY SIGNAL</div>
+                    <div class="text-sm mt-1" id="signal-details">Waiting for signals...</div>
+                </div>
+                <div class="text-right">
+                    <div class="text-sm text-gray-400">Confidence</div>
+                    <div class="text-3xl font-bold" id="signal-confidence">0%</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Instruments Grid -->
+        <div id="instruments-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <!-- Instrument cards will be inserted here -->
+        </div>
+
+        <!-- Signal History -->
+        <div class="bg-gray-800 rounded-lg shadow-xl border border-gray-700">
+            <div class="px-6 py-4 border-b border-gray-700 flex items-center justify-between">
+                <h2 class="text-xl font-bold">📜 Signal History</h2>
+                <button onclick="clearHistory()" class="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm">
+                    Clear
+                </button>
+            </div>
+            <div id="signal-history" class="p-6 max-h-96 overflow-y-auto">
+                <div class="text-gray-500">No signals yet</div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let eventSource = null;
+        let instrumentData = new Map();
+        let signalHistory = [];
+
+        // Initialize SSE
+        function initSSE() {
+            eventSource = new EventSource('/stream/signals');
+            
+            eventSource.onopen = () => {
+                updateStatus('connected');
+                console.log('✅ Connected to Signals Stream');
+            };
+            
+            eventSource.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    // Handle different message types
+                    if (data.type === 'connection') {
+                        console.log('✅ Connected to signals stream');
+                        return;
+                    }
+                    
+                    if (data.type === 'signal_update' && data.analyses) {
+                        handleSignalUpdate(data);
+                    }
+                } catch (error) {
+                    console.error('Parse error:', error, 'Data:', event.data);
+                }
+            };
+            
+            eventSource.onerror = () => {
+                updateStatus('disconnected');
+                setTimeout(initSSE, 5000);
+            };
+        }
+
+        // Handle signal updates
+        function handleSignalUpdate(data) {
+            if (!data.analyses || typeof data.analyses !== 'object') {
+                console.warn('Invalid analyses data:', data);
+                return;
+            }
+            
+            Object.entries(data.analyses).forEach(([symbol, analysis]) => {
+                // Validate analysis structure
+                if (!analysis || !analysis.indicators) {
+                    console.warn('Invalid analysis for', symbol, analysis);
+                    return;
+                }
+                
+                instrumentData.set(symbol, analysis);
+                
+                // Check for new signals
+                if (analysis.signals) {
+                    if (analysis.signals.buy) {
+                        showActiveBuySignal(analysis.signals.buy);
+                        addToHistory(analysis.signals.buy);
+                    }
+                    if (analysis.signals.sell) {
+                        showActiveSellSignal(analysis.signals.sell);
+                        addToHistory(analysis.signals.sell);
+                    }
+                }
+            });
+            
+            renderInstruments();
+        }
+
+        // Show active buy signal
+        function showActiveBuySignal(signal) {
+            const banner = document.getElementById('active-signals-banner');
+            banner.className = 'mb-8 p-6 rounded-lg border-2 border-green-500 bg-green-900 bg-opacity-20 signal-buy';
+            banner.classList.remove('hidden');
+            
+            document.getElementById('signal-action').textContent = '🟢 BUY SIGNAL';
+            document.getElementById('signal-details').textContent = 
+                `${signal.symbol} @ ₹${signal.entry} | ${signal.signal_count}/5 conditions met`;
+            document.getElementById('signal-confidence').textContent = 
+                `${(signal.confidence * 100).toFixed(0)}%`;
+            
+            // Auto-hide after 10 seconds
+            setTimeout(() => {
+                banner.classList.add('hidden');
+            }, 10000);
+        }
+
+        // Show active sell signal
+        function showActiveSellSignal(signal) {
+            const banner = document.getElementById('active-signals-banner');
+            banner.className = 'mb-8 p-6 rounded-lg border-2 border-red-500 bg-red-900 bg-opacity-20 signal-sell';
+            banner.classList.remove('hidden');
+            
+            document.getElementById('signal-action').textContent = '🔴 SELL SIGNAL';
+            document.getElementById('signal-details').textContent = 
+                `${signal.symbol} @ ₹${signal.exit} | ${signal.reason}`;
+            document.getElementById('signal-confidence').textContent = 
+                `${signal.signal_count}/5`;
+            
+            setTimeout(() => {
+                banner.classList.add('hidden');
+            }, 10000);
+        }
+
+        // Add to history
+        function addToHistory(signal) {
+            signalHistory.unshift({
+                ...signal,
+                time: new Date().toLocaleTimeString()
+            });
+            
+            if (signalHistory.length > 20) {
+                signalHistory.pop();
+            }
+            
+            renderHistory();
+        }
+
+        // Render instruments
+        function renderInstruments() {
+            const grid = document.getElementById('instruments-grid');
+            grid.innerHTML = '';
+            
+            instrumentData.forEach((analysis, symbol) => {
+                const indicators = analysis.indicators;
+                const card = createInstrumentCard(symbol, analysis);
+                grid.innerHTML += card;
+            });
+        }
+
+        // Create instrument card
+        function createInstrumentCard(symbol, analysis) {
+            // Validate data structure
+            if (!analysis || !analysis.indicators) {
+                console.error('Invalid analysis structure for', symbol);
+                return `
+                    <div class="bg-gray-800 rounded-lg p-6 shadow-xl border border-gray-700">
+                        <div class="text-red-400">Error: Invalid data for ${symbol}</div>
+                    </div>
+                `;
+            }
+            
+            const indicators = analysis.indicators;
+            const ofi = indicators.ofi || {value: 0, signal: 'UNKNOWN', tbq: 0, tsq: 0};
+            const spread = indicators.spread || {percentage: 0, signal: 'UNKNOWN', best_bid: 0, best_ask: 0, quality: 0};
+            const momentum = indicators.momentum || {value: 0, signal: 'NEUTRAL', avg: 0, ticks: 0};
+            const volumeSpike = indicators.volume_spike || {ratio: 0, signal: 'NORMAL', current: 0, avg: 0};
+            
+            // OFI Color
+            const ofiColor = ofi.value > 0.5 ? 'text-green-400' : 
+                            ofi.value > 0.3 ? 'text-blue-400' : 
+                            ofi.value < 0 ? 'text-red-400' : 'text-gray-400';
+            
+            // Spread Color
+            const spreadColor = spread.percentage < 0.2 ? 'text-green-400' : 
+                               spread.percentage < 0.5 ? 'text-yellow-400' : 'text-red-400';
+            
+            // Momentum Color
+            const momentumColor = momentum.signal === 'BULLISH' ? 'text-green-400' : 
+                                 momentum.signal === 'BEARISH' ? 'text-red-400' : 'text-gray-400';
+            
+            // Volume Color
+            const volumeColor = volumeSpike.ratio >= 3 ? 'text-red-400' : 
+                               volumeSpike.ratio >= 2 ? 'text-yellow-400' : 'text-gray-400';
+            
+            return `
+                <div class="bg-gray-800 rounded-lg p-6 shadow-xl border border-gray-700">
+                    <div class="flex items-center justify-between mb-6">
+                        <div>
+                            <h3 class="text-2xl font-bold">${symbol.split('|')[1]}</h3>
+                            <p class="text-gray-400 text-sm">${symbol}</p>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-3xl font-bold">₹${analysis.ltp}</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Indicators Grid -->
+                    <div class="grid grid-cols-2 gap-4 mb-6">
+                        <!-- OFI -->
+                        <div class="bg-gray-900 bg-opacity-50 rounded-lg p-4">
+                            <div class="text-xs text-gray-400 mb-2">Order Flow Imbalance</div>
+                            <div class="${ofiColor} text-2xl font-bold mb-1">${ofi.value.toFixed(3)}</div>
+                            <div class="text-sm font-semibold ${ofiColor}">${ofi.signal}</div>
+                            <div class="mt-2 text-xs text-gray-500">
+                                Bid: ${ofi.tbq.toLocaleString()} | Ask: ${ofi.tsq.toLocaleString()}
+                            </div>
+                            <div class="mt-2 w-full bg-gray-700 rounded-full h-2">
+                                <div class="bg-gradient-to-r from-red-500 via-gray-500 to-green-500 h-2 rounded-full transition-all"
+                                     style="width: ${((ofi.value + 1) / 2 * 100).toFixed(0)}%"></div>
+                            </div>
+                        </div>
+                        
+                        <!-- Spread Quality -->
+                        <div class="bg-gray-900 bg-opacity-50 rounded-lg p-4">
+                            <div class="text-xs text-gray-400 mb-2">Spread Quality</div>
+                            <div class="${spreadColor} text-2xl font-bold mb-1">${spread.percentage.toFixed(2)}%</div>
+                            <div class="text-sm font-semibold ${spreadColor}">${spread.signal}</div>
+                            <div class="mt-2 text-xs text-gray-500">
+                                ${spread.best_bid} ↔ ${spread.best_ask}
+                            </div>
+                            <div class="mt-2">
+                                <div class="text-xs text-gray-400">Quality: ${spread.quality}%</div>
+                                <div class="w-full bg-gray-700 rounded-full h-2 mt-1">
+                                    <div class="${spreadColor.replace('text', 'bg')} h-2 rounded-full transition-all"
+                                         style="width: ${spread.quality}%"></div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Momentum -->
+                        <div class="bg-gray-900 bg-opacity-50 rounded-lg p-4">
+                            <div class="text-xs text-gray-400 mb-2">Price Momentum</div>
+                            <div class="${momentumColor} text-2xl font-bold mb-1">${(momentum.value * 100).toFixed(2)}%</div>
+                            <div class="text-sm font-semibold ${momentumColor}">${momentum.signal}</div>
+                            <div class="mt-2 text-xs text-gray-500">
+                                Avg: ${momentum.avg} (${momentum.ticks} ticks)
+                            </div>
+                        </div>
+                        
+                        <!-- Volume Spike -->
+                        <div class="bg-gray-900 bg-opacity-50 rounded-lg p-4">
+                            <div class="text-xs text-gray-400 mb-2">Volume Spike</div>
+                            <div class="${volumeColor} text-2xl font-bold mb-1">${volumeSpike.ratio.toFixed(1)}x</div>
+                            <div class="text-sm font-semibold ${volumeColor}">${volumeSpike.signal}</div>
+                            <div class="mt-2 text-xs text-gray-500">
+                                Curr: ${volumeSpike.current.toLocaleString()} | Avg: ${volumeSpike.avg.toLocaleString()}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Signal Indicators -->
+                    ${renderSignalIndicators(analysis.signals)}
+                </div>
+            `;
+        }
+
+        // Render signal indicators
+        function renderSignalIndicators(signals) {
+            if (!signals.buy && !signals.sell) {
+                return `
+                    <div class="border-t border-gray-700 pt-4">
+                        <div class="text-center text-gray-500 text-sm">
+                            No active signals
+                        </div>
+                    </div>
+                `;
+            }
+            
+            let html = '<div class="border-t border-gray-700 pt-4 space-y-3">';
+            
+            if (signals.buy) {
+                html += `
+                    <div class="bg-green-900 bg-opacity-30 border border-green-600 rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="text-green-400 font-bold text-lg">🟢 BUY SIGNAL</div>
+                            <div class="text-green-400 text-xl font-bold">${(signals.buy.confidence * 100).toFixed(0)}%</div>
+                        </div>
+                        <div class="text-sm text-gray-300 mb-2">
+                            Entry: ₹${signals.buy.entry} | ${signals.buy.signal_count}/5 Conditions
+                        </div>
+                        <div class="space-y-1">
+                            ${signals.buy.signals.map(s => `
+                                <div class="text-xs text-green-300">✓ ${s}</div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            if (signals.sell) {
+                html += `
+                    <div class="bg-red-900 bg-opacity-30 border border-red-600 rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="text-red-400 font-bold text-lg">🔴 SELL SIGNAL</div>
+                            <div class="text-red-400 text-sm">${signals.sell.signal_count}/5</div>
+                        </div>
+                        <div class="text-sm text-gray-300 mb-2">
+                            Exit: ₹${signals.sell.exit} | ${signals.sell.reason}
+                        </div>
+                        <div class="space-y-1">
+                            ${signals.sell.signals.map(s => `
+                                <div class="text-xs text-red-300">✓ ${s}</div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            html += '</div>';
+            return html;
+        }
+
+        // Render history
+        function renderHistory() {
+            const container = document.getElementById('signal-history');
+            
+            if (signalHistory.length === 0) {
+                container.innerHTML = '<div class="text-gray-500">No signals yet</div>';
+                return;
+            }
+            
+            container.innerHTML = signalHistory.map(signal => {
+                const isBuy = signal.action === 'BUY';
+                const bgColor = isBuy ? 'bg-green-900 bg-opacity-20 border-green-600' : 'bg-red-900 bg-opacity-20 border-red-600';
+                const textColor = isBuy ? 'text-green-400' : 'text-red-400';
+                
+                return `
+                    <div class="border ${bgColor} rounded-lg p-4 mb-3">
+                        <div class="flex items-start justify-between">
+                            <div>
+                                <div class="${textColor} font-bold text-lg">
+                                    ${isBuy ? '🟢 BUY' : '🔴 SELL'} - ${signal.symbol.split('|')[1]}
+                                </div>
+                                <div class="text-gray-300 text-sm mt-1">
+                                    ${isBuy ? 
+                                        `Entry: ₹${signal.entry} | Confidence: ${(signal.confidence * 100).toFixed(0)}%` :
+                                        `Exit: ₹${signal.exit} | ${signal.reason}`
+                                    }
+                                </div>
+                                <div class="mt-2 space-y-1">
+                                    ${signal.signals.slice(0, 3).map(s => `
+                                        <div class="text-xs text-gray-400">• ${s}</div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                            <div class="text-right text-xs text-gray-500">
+                                ${signal.time}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Clear history
+        function clearHistory() {
+            signalHistory = [];
+            renderHistory();
+        }
+
+        // Update connection status
+        function updateStatus(status) {
+            const indicator = document.getElementById('status-indicator');
+            const text = document.getElementById('status-text');
+            
+            if (status === 'connected') {
+                indicator.className = 'w-3 h-3 rounded-full bg-green-500 animate-pulse';
+                text.textContent = 'Connected';
+            } else {
+                indicator.className = 'w-3 h-3 rounded-full bg-red-500';
+                text.textContent = 'Disconnected';
+            }
+        }
+
+        // Initialize
+        initSSE();
+        
+        // Periodic refresh
+        setInterval(async () => {
+            try {
+                const response = await fetch('/api/signals');
+                const data = await response.json();
+                if (data.analyses) {
+                    Object.entries(data.analyses).forEach(([symbol, analysis]) => {
+                        instrumentData.set(symbol, analysis);
+                    });
+                    renderInstruments();
+                }
+            } catch (error) {
+                console.error('Refresh error:', error);
+            }
+        }, 2000);
+    </script>
+</body>
+</html>
