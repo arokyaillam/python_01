@@ -13,24 +13,26 @@ from datetime import datetime
 from collections import deque
 from flask import Flask, Response, render_template, jsonify
 from flask_cors import CORS
-from dotenv import load_dotenv  
+from dotenv import load_dotenv
+
 
 import websockets
 import requests
 from google.protobuf.json_format import MessageToDict
 import MarketDataFeedV3_pb2 as pb
-load_dotenv()  # Load environment variables from .env file
 
 # Import analyzers
 from bigmove_detector import BigMoveDetector
-from signal_analyzer import SignalAnalyzer
-
+from signal_analyzer_strong import StrongSignalAnalyzer  # Strong signals only
+# Load environment variables
+load_dotenv()
 
 # Configuration
 ACCESS_TOKEN = os.getenv('ACCESS_TOKEN', 'YOUR_ACCESS_TOKEN')
 DEFAULT_INSTRUMENTS = [
-    "NSE_FO|58998",
-    "NSE_FO|59003",
+    "NSE_FO|58970",
+    "NSE_FO|58973",
+    
 ]
 
 app = Flask(__name__)
@@ -48,7 +50,7 @@ class GlobalState:
         self.lock = threading.Lock()
         self.message_count = 0
         self.bigmove_detector = BigMoveDetector()
-        self.signal_analyzer = SignalAnalyzer(lookback_ticks=5)
+        self.signal_analyzer = StrongSignalAnalyzer(lookback_ticks=5)
 
 state = GlobalState()
 
