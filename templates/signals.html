@@ -17,15 +17,6 @@
         .signal-buy { animation: pulse-buy 1.5s infinite; }
         .signal-sell { animation: pulse-sell 1.5s infinite; }
         .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-        .gauge-bg {
-            background: conic-gradient(
-                from 0deg,
-                #ef4444 0deg 90deg,
-                #f59e0b 90deg 180deg,
-                #10b981 180deg 270deg,
-                #3b82f6 270deg 360deg
-            );
-        }
     </style>
 </head>
 <body class="bg-gray-900 text-white min-h-screen">
@@ -55,19 +46,21 @@
         <div id="active-signals-banner" class="hidden mb-8 p-6 rounded-lg border-2 animate-pulse">
             <div class="flex items-center justify-between">
                 <div>
-                    <div class="text-2xl font-bold" id="signal-action">BUY SIGNAL</div>
-                    <div class="text-sm mt-1" id="signal-details">Waiting for signals...</div>
+                    <div class="text-2xl font-bold" id="signal-action">WAITING FOR SIGNALS</div>
+                    <div class="text-sm mt-1" id="signal-details">No active signals</div>
                 </div>
                 <div class="text-right">
                     <div class="text-sm text-gray-400">Confidence</div>
-                    <div class="text-3xl font-bold" id="signal-confidence">0%</div>
+                    <div class="text-3xl font-bold" id="signal-confidence">-</div>
                 </div>
             </div>
         </div>
 
         <!-- Instruments Grid -->
         <div id="instruments-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-            <!-- Instrument cards will be inserted here -->
+            <div class="bg-gray-800 rounded-lg p-6 text-center text-gray-500">
+                Waiting for market data...
+            </div>
         </div>
 
         <!-- Signal History -->
@@ -89,6 +82,18 @@
         let instrumentData = new Map();
         let signalHistory = [];
 
+        // Safe number conversion with defaults
+        function toNum(val, defaultVal = 0) {
+            if (val === null || val === undefined || val === '') return defaultVal;
+            const num = Number(val);
+            return isNaN(num) ? defaultVal : num;
+        }
+
+        // Safe string getter
+        function getStr(obj, key, defaultVal = 'UNKNOWN') {
+            return obj && obj[key] ? String(obj[key]) : defaultVal;
+        }
+
         // Initialize SSE
         function initSSE() {
             eventSource = new EventSource('/stream/signals');
@@ -102,9 +107,8 @@
                 try {
                     const data = JSON.parse(event.data);
                     
-                    // Handle different message types
                     if (data.type === 'connection') {
-                        console.log('✅ Connected to signals stream');
+                        console.log('✅ Connected:', data.message);
                         return;
                     }
                     
@@ -112,7 +116,7 @@
                         handleSignalUpdate(data);
                     }
                 } catch (error) {
-                    console.error('Parse error:', error, 'Data:', event.data);
+                    console.error('Parse error:', error);
                 }
             };
             
@@ -125,14 +129,11 @@
         // Handle signal updates
         function handleSignalUpdate(data) {
             if (!data.analyses || typeof data.analyses !== 'object') {
-                console.warn('Invalid analyses data:', data);
                 return;
             }
             
             Object.entries(data.analyses).forEach(([symbol, analysis]) => {
-                // Validate analysis structure
                 if (!analysis || !analysis.indicators) {
-                    console.warn('Invalid analysis for', symbol, analysis);
                     return;
                 }
                 
@@ -157,19 +158,26 @@
         // Show active buy signal
         function showActiveBuySignal(signal) {
             const banner = document.getElementById('active-signals-banner');
-            banner.className = 'mb-8 p-6 rounded-lg border-2 border-green-500 bg-green-900 bg-opacity-20 signal-buy';
+            const isStrongSignal = signal.action === 'STRONG_BUY';
+            
+            banner.className = `mb-8 p-6 rounded-lg border-2 ${isStrongSignal ? 'border-green-400' : 'border-green-500'} bg-green-900 bg-opacity-20 signal-buy`;
             banner.classList.remove('hidden');
             
-            document.getElementById('signal-action').textContent = '🟢 BUY SIGNAL';
-            document.getElementById('signal-details').textContent =
-                `${signal.symbol ? signal.symbol : 'Unknown'} @ ₹${signal.entry ? signal.entry : '0'} | ${signal.signal_count ? signal.signal_count : '0'}/5 conditions met`;
-            document.getElementById('signal-confidence').textContent =
-                `${signal.confidence ? (signal.confidence * 100).toFixed(0) : '0'}%`;
+            const symbol = signal.symbol || 'Unknown';
+            const entry = toNum(signal.entry, 0);
+            const signalCount = toNum(signal.signal_count, 0);
+            const totalConditions = toNum(signal.total_conditions, 7);
+            const confidence = toNum(signal.confidence, 0);
+            const alert = signal.alert || '';
             
-            // Auto-hide after 10 seconds
-            setTimeout(() => {
-                banner.classList.add('hidden');
-            }, 10000);
+            document.getElementById('signal-action').innerHTML = 
+                `${isStrongSignal ? '🔥 STRONG BUY SIGNAL 🔥' : '🟢 BUY SIGNAL'}${alert ? '<br><span class="text-yellow-400 text-base">' + alert + '</span>' : ''}`;
+            document.getElementById('signal-details').textContent = 
+                `${symbol.split('|')[1] || symbol} @ ₹${entry.toFixed(2)} | ${signalCount}/${totalConditions} conditions met`;
+            document.getElementById('signal-confidence').textContent = 
+                `${(confidence * 100).toFixed(0)}%`;
+            
+            setTimeout(() => banner.classList.add('hidden'), isStrongSignal ? 15000 : 10000);
         }
 
         // Show active sell signal
@@ -178,15 +186,17 @@
             banner.className = 'mb-8 p-6 rounded-lg border-2 border-red-500 bg-red-900 bg-opacity-20 signal-sell';
             banner.classList.remove('hidden');
             
-            document.getElementById('signal-action').textContent = '🔴 SELL SIGNAL';
-            document.getElementById('signal-details').textContent =
-                `${signal.symbol ? signal.symbol : 'Unknown'} @ ₹${signal.exit ? signal.exit : '0'} | ${signal.reason ? signal.reason : 'Unknown'}`;
-            document.getElementById('signal-confidence').textContent =
-                `${signal.signal_count ? signal.signal_count : '0'}/5`;
+            const symbol = signal.symbol || 'Unknown';
+            const exit = toNum(signal.exit, 0);
+            const reason = signal.reason || 'Unknown';
+            const signalCount = toNum(signal.signal_count, 0);
             
-            setTimeout(() => {
-                banner.classList.add('hidden');
-            }, 10000);
+            document.getElementById('signal-action').textContent = '🔴 SELL SIGNAL';
+            document.getElementById('signal-details').textContent = 
+                `${symbol.split('|')[1] || symbol} @ ₹${exit.toFixed(2)} | ${reason}`;
+            document.getElementById('signal-confidence').textContent = `${signalCount}/5`;
+            
+            setTimeout(() => banner.classList.add('hidden'), 10000);
         }
 
         // Add to history
@@ -206,10 +216,15 @@
         // Render instruments
         function renderInstruments() {
             const grid = document.getElementById('instruments-grid');
+            
+            if (instrumentData.size === 0) {
+                grid.innerHTML = '<div class="bg-gray-800 rounded-lg p-6 text-center text-gray-500">Waiting for market data...</div>';
+                return;
+            }
+            
             grid.innerHTML = '';
             
             instrumentData.forEach((analysis, symbol) => {
-                const indicators = analysis.indicators;
                 const card = createInstrumentCard(symbol, analysis);
                 grid.innerHTML += card;
             });
@@ -217,69 +232,66 @@
 
         // Create instrument card
         function createInstrumentCard(symbol, analysis) {
-            // Validate data structure
             if (!analysis || !analysis.indicators) {
-                console.error('Invalid analysis structure for', symbol);
-                return `
-                    <div class="bg-gray-800 rounded-lg p-6 shadow-xl border border-gray-700">
-                        <div class="text-red-400">Error: Invalid data for ${symbol}</div>
-                    </div>
-                `;
+                return `<div class="bg-gray-800 rounded-lg p-6 text-red-400">Error: Invalid data for ${symbol}</div>`;
             }
             
             const indicators = analysis.indicators;
-            const ofi = indicators.ofi ? {
-                value: Number(indicators.ofi.value) || 0,
-                signal: indicators.ofi.signal || 'UNKNOWN',
-                tbq: Number(indicators.ofi.tbq) || 0,
-                tsq: Number(indicators.ofi.tsq) || 0
-            } : {value: 0, signal: 'UNKNOWN', tbq: 0, tsq: 0};
-            const spread = indicators.spread ? {
-                percentage: Number(indicators.spread.percentage) || 0,
-                signal: indicators.spread.signal || 'UNKNOWN',
-                best_bid: Number(indicators.spread.best_bid) || 0,
-                best_ask: Number(indicators.spread.best_ask) || 0,
-                quality: Number(indicators.spread.quality) || 0
-            } : {percentage: 0, signal: 'UNKNOWN', best_bid: 0, best_ask: 0, quality: 0};
-            const momentum = indicators.momentum ? {
-                value: Number(indicators.momentum.value) || 0,
-                signal: indicators.momentum.signal || 'NEUTRAL',
-                avg: Number(indicators.momentum.avg) || 0,
-                ticks: Number(indicators.momentum.ticks) || 0
-            } : {value: 0, signal: 'NEUTRAL', avg: 0, ticks: 0};
-            const volumeSpike = indicators.volume_spike ? {
-                ratio: Number(indicators.volume_spike.ratio) || 0,
-                signal: indicators.volume_spike.signal || 'NORMAL',
-                current: Number(indicators.volume_spike.current) || 0,
-                avg: Number(indicators.volume_spike.avg) || 0
-            } : {ratio: 0, signal: 'NORMAL', current: 0, avg: 0};
+            const ltp = toNum(analysis.ltp, 0);
             
-            // OFI Color
-            const ofiColor = ofi.value > 0.5 ? 'text-green-400' : 
-                            ofi.value > 0.3 ? 'text-blue-400' : 
-                            ofi.value < 0 ? 'text-red-400' : 'text-gray-400';
+            // OFI with safe defaults
+            const ofi = indicators.ofi || {};
+            const ofiValue = toNum(ofi.value, 0);
+            const ofiSignal = getStr(ofi, 'signal', 'NEUTRAL');
+            const ofiTbq = toNum(ofi.tbq, 0);
+            const ofiTsq = toNum(ofi.tsq, 0);
             
-            // Spread Color
-            const spreadColor = spread.percentage < 0.2 ? 'text-green-400' : 
-                               spread.percentage < 0.5 ? 'text-yellow-400' : 'text-red-400';
+            // Spread with safe defaults - check if spread data exists
+            const spread = indicators.spread || {};
+            const hasSpreadData = spread.percentage !== undefined && spread.percentage !== null;
+            const spreadPct = hasSpreadData ? toNum(spread.percentage, 0) : 0;
+            const spreadSignal = hasSpreadData ? getStr(spread, 'signal', 'UNKNOWN') : 'NO DATA';
+            const spreadBid = toNum(spread.best_bid, ltp);
+            const spreadAsk = toNum(spread.best_ask, ltp);
+            const spreadQuality = toNum(spread.quality, 0);
             
-            // Momentum Color
-            const momentumColor = momentum.signal === 'BULLISH' ? 'text-green-400' : 
-                                 momentum.signal === 'BEARISH' ? 'text-red-400' : 'text-gray-400';
+            // Momentum with safe defaults
+            const momentum = indicators.momentum || {};
+            const momentumValue = toNum(momentum.value, 0);
+            const momentumSignal = getStr(momentum, 'signal', 'NEUTRAL');
+            const momentumAvg = toNum(momentum.avg, 0);
+            const momentumTicks = toNum(momentum.ticks, 0);
             
-            // Volume Color
-            const volumeColor = volumeSpike.ratio >= 3 ? 'text-red-400' : 
-                               volumeSpike.ratio >= 2 ? 'text-yellow-400' : 'text-gray-400';
+            // Volume spike with safe defaults
+            const volumeSpike = indicators.volume_spike || {};
+            const volRatio = toNum(volumeSpike.ratio, 0);
+            const volSignal = getStr(volumeSpike, 'signal', 'NORMAL');
+            const volCurrent = toNum(volumeSpike.current, 0);
+            const volAvg = toNum(volumeSpike.avg, 0);
+            
+            // Colors
+            const ofiColor = ofiValue > 0.5 ? 'text-green-400' : 
+                            ofiValue > 0.3 ? 'text-blue-400' : 
+                            ofiValue < 0 ? 'text-red-400' : 'text-gray-400';
+            
+            const spreadColor = spreadPct < 0.2 ? 'text-green-400' : 
+                               spreadPct < 0.5 ? 'text-yellow-400' : 'text-red-400';
+            
+            const momentumColor = momentumSignal === 'BULLISH' ? 'text-green-400' : 
+                                 momentumSignal === 'BEARISH' ? 'text-red-400' : 'text-gray-400';
+            
+            const volumeColor = volRatio >= 3 ? 'text-red-400' : 
+                               volRatio >= 2 ? 'text-yellow-400' : 'text-gray-400';
             
             return `
                 <div class="bg-gray-800 rounded-lg p-6 shadow-xl border border-gray-700">
                     <div class="flex items-center justify-between mb-6">
                         <div>
-                            <h3 class="text-2xl font-bold">${symbol.split('|')[1]}</h3>
+                            <h3 class="text-2xl font-bold">${symbol.split('|')[1] || symbol}</h3>
                             <p class="text-gray-400 text-sm">${symbol}</p>
                         </div>
                         <div class="text-right">
-                            <div class="text-3xl font-bold">₹${analysis.ltp ? analysis.ltp : '0'}</div>
+                            <div class="text-3xl font-bold">₹${ltp.toFixed(2)}</div>
                         </div>
                     </div>
                     
@@ -288,30 +300,30 @@
                         <!-- OFI -->
                         <div class="bg-gray-900 bg-opacity-50 rounded-lg p-4">
                             <div class="text-xs text-gray-400 mb-2">Order Flow Imbalance</div>
-                            <div class="${ofiColor} text-2xl font-bold mb-1">${ofi.value.toFixed(3)}</div>
-                            <div class="text-sm font-semibold ${ofiColor}">${ofi.signal}</div>
+                            <div class="${ofiColor} text-2xl font-bold mb-1">${ofiValue.toFixed(3)}</div>
+                            <div class="text-sm font-semibold ${ofiColor}">${ofiSignal}</div>
                             <div class="mt-2 text-xs text-gray-500">
-                                Bid: ${ofi.tbq ? ofi.tbq.toLocaleString() : '0'} | Ask: ${ofi.tsq ? ofi.tsq.toLocaleString() : '0'}
+                                Bid: ${ofiTbq.toLocaleString()} | Ask: ${ofiTsq.toLocaleString()}
                             </div>
                             <div class="mt-2 w-full bg-gray-700 rounded-full h-2">
                                 <div class="bg-gradient-to-r from-red-500 via-gray-500 to-green-500 h-2 rounded-full transition-all"
-                                     style="width: ${((ofi.value + 1) / 2 * 100).toFixed(0)}%"></div>
+                                     style="width: ${((ofiValue + 1) / 2 * 100).toFixed(0)}%"></div>
                             </div>
                         </div>
                         
                         <!-- Spread Quality -->
                         <div class="bg-gray-900 bg-opacity-50 rounded-lg p-4">
                             <div class="text-xs text-gray-400 mb-2">Spread Quality</div>
-                            <div class="${spreadColor} text-2xl font-bold mb-1">${spread.percentage.toFixed(2)}%</div>
-                            <div class="text-sm font-semibold ${spreadColor}">${spread.signal}</div>
+                            <div class="${spreadColor} text-2xl font-bold mb-1">${spreadPct.toFixed(2)}%</div>
+                            <div class="text-sm font-semibold ${spreadColor}">${spreadSignal}</div>
                             <div class="mt-2 text-xs text-gray-500">
-                                ${spread.best_bid ? spread.best_bid : '0'} ↔ ${spread.best_ask ? spread.best_ask : '0'}
+                                ${spreadBid.toFixed(2)} ↔ ${spreadAsk.toFixed(2)}
                             </div>
                             <div class="mt-2">
-                                <div class="text-xs text-gray-400">Quality: ${spread.quality}%</div>
+                                <div class="text-xs text-gray-400">Quality: ${spreadQuality.toFixed(0)}%</div>
                                 <div class="w-full bg-gray-700 rounded-full h-2 mt-1">
                                     <div class="${spreadColor.replace('text', 'bg')} h-2 rounded-full transition-all"
-                                         style="width: ${spread.quality}%"></div>
+                                         style="width: ${spreadQuality}%"></div>
                                 </div>
                             </div>
                         </div>
@@ -319,20 +331,20 @@
                         <!-- Momentum -->
                         <div class="bg-gray-900 bg-opacity-50 rounded-lg p-4">
                             <div class="text-xs text-gray-400 mb-2">Price Momentum</div>
-                            <div class="${momentumColor} text-2xl font-bold mb-1">${(momentum.value * 100).toFixed(2)}%</div>
-                            <div class="text-sm font-semibold ${momentumColor}">${momentum.signal}</div>
+                            <div class="${momentumColor} text-2xl font-bold mb-1">${(momentumValue * 100).toFixed(2)}%</div>
+                            <div class="text-sm font-semibold ${momentumColor}">${momentumSignal}</div>
                             <div class="mt-2 text-xs text-gray-500">
-                                Avg: ${momentum.avg ? momentum.avg : '0'} (${momentum.ticks ? momentum.ticks : '0'} ticks)
+                                Avg: ${momentumAvg.toFixed(2)} (${momentumTicks} ticks)
                             </div>
                         </div>
                         
                         <!-- Volume Spike -->
                         <div class="bg-gray-900 bg-opacity-50 rounded-lg p-4">
                             <div class="text-xs text-gray-400 mb-2">Volume Spike</div>
-                            <div class="${volumeColor} text-2xl font-bold mb-1">${volumeSpike.ratio.toFixed(1)}x</div>
-                            <div class="text-sm font-semibold ${volumeColor}">${volumeSpike.signal}</div>
+                            <div class="${volumeColor} text-2xl font-bold mb-1">${volRatio.toFixed(1)}x</div>
+                            <div class="text-sm font-semibold ${volumeColor}">${volSignal}</div>
                             <div class="mt-2 text-xs text-gray-500">
-                                Curr: ${volumeSpike.current ? volumeSpike.current.toLocaleString() : '0'} | Avg: ${volumeSpike.avg ? volumeSpike.avg.toLocaleString() : '0'}
+                                Curr: ${volCurrent.toLocaleString()} | Avg: ${volAvg.toLocaleString()}
                             </div>
                         </div>
                     </div>
@@ -348,9 +360,7 @@
             if (!signals || (!signals.buy && !signals.sell)) {
                 return `
                     <div class="border-t border-gray-700 pt-4">
-                        <div class="text-center text-gray-500 text-sm">
-                            No active signals
-                        </div>
+                        <div class="text-center text-gray-500 text-sm">No active signals</div>
                     </div>
                 `;
             }
@@ -358,38 +368,88 @@
             let html = '<div class="border-t border-gray-700 pt-4 space-y-3">';
             
             if (signals.buy) {
+                const confidence = toNum(signals.buy.confidence, 0);
+                const entry = toNum(signals.buy.entry, 0);
+                const signalCount = toNum(signals.buy.signal_count, 0);
+                const totalConditions = toNum(signals.buy.total_conditions, 5);
+                const signalList = signals.buy.signals || [];
+                const isStrongSignal = signals.buy.action === 'STRONG_BUY';
+                const alert = signals.buy.alert || '';
+                
+                // Greeks data if available
+                const greeks = signals.buy.greeks || {};
+                const gamma = toNum(greeks.gamma, 0);
+                const delta = toNum(greeks.delta, 0);
+                const iv = toNum(greeks.iv, 0);
+                
+                // Additional metrics
+                const ofiValue = toNum(signals.buy.ofi, 0);
+                const volumeRatio = toNum(signals.buy.volume_ratio, 0);
+                
                 html += `
-                    <div class="bg-green-900 bg-opacity-30 border border-green-600 rounded-lg p-4">
+                    <div class="bg-green-900 bg-opacity-30 border-2 ${isStrongSignal ? 'border-green-400' : 'border-green-600'} rounded-lg p-4 ${isStrongSignal ? 'signal-buy' : ''}">
+                        ${alert ? `<div class="text-yellow-400 font-bold text-center mb-2">${alert}</div>` : ''}
                         <div class="flex items-center justify-between mb-2">
-                            <div class="text-green-400 font-bold text-lg">🟢 BUY SIGNAL</div>
-                            <div class="text-green-400 text-xl font-bold">${signals.buy.confidence ? (signals.buy.confidence * 100).toFixed(0) : '0'}%</div>
+                            <div class="text-green-400 font-bold text-lg">🟢 ${isStrongSignal ? 'STRONG BUY SIGNAL' : 'BUY SIGNAL'}</div>
+                            <div class="text-green-400 text-xl font-bold">${(confidence * 100).toFixed(0)}%</div>
                         </div>
                         <div class="text-sm text-gray-300 mb-2">
-                            Entry: ₹${signals.buy.entry ? signals.buy.entry : '0'} | ${signals.buy.signal_count ? signals.buy.signal_count : '0'}/5 Conditions
+                            Entry: ₹${entry.toFixed(2)} | ${signalCount}/${totalConditions} Conditions Met
                         </div>
-                        <div class="space-y-1">
-                            ${signals.buy.signals && signals.buy.signals.length ? signals.buy.signals.map(s => `
-                                <div class="text-xs text-green-300">✓ ${s}</div>
-                            `).join('') : '<div class="text-xs text-gray-500">No signals available</div>'}
+                        ${isStrongSignal && (gamma > 0 || delta > 0 || iv > 0) ? `
+                        <div class="grid grid-cols-3 gap-2 mb-2 p-2 bg-gray-900 bg-opacity-50 rounded">
+                            <div class="text-center">
+                                <div class="text-xs text-gray-400">Gamma</div>
+                                <div class="text-sm font-bold ${gamma > 0.001 ? 'text-yellow-400' : 'text-gray-300'}">${gamma.toFixed(4)}</div>
+                            </div>
+                            <div class="text-center">
+                                <div class="text-xs text-gray-400">Delta</div>
+                                <div class="text-sm font-bold ${Math.abs(delta) > 0.6 ? 'text-yellow-400' : 'text-gray-300'}">${delta.toFixed(3)}</div>
+                            </div>
+                            <div class="text-center">
+                                <div class="text-xs text-gray-400">IV</div>
+                                <div class="text-sm font-bold ${iv > 0.2 ? 'text-yellow-400' : 'text-gray-300'}">${(iv * 100).toFixed(1)}%</div>
+                            </div>
+                        </div>
+                        ` : ''}
+                        ${ofiValue > 0 || volumeRatio > 0 ? `
+                        <div class="grid grid-cols-2 gap-2 mb-2 p-2 bg-gray-900 bg-opacity-50 rounded">
+                            <div>
+                                <div class="text-xs text-gray-400">OFI</div>
+                                <div class="text-sm font-bold ${ofiValue > 0.6 ? 'text-green-400' : 'text-gray-300'}">${ofiValue.toFixed(3)}</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-gray-400">Volume</div>
+                                <div class="text-sm font-bold ${volumeRatio >= 3 ? 'text-red-400' : 'text-gray-300'}">${volumeRatio.toFixed(1)}x</div>
+                            </div>
+                        </div>
+                        ` : ''}
+                        <div class="space-y-1 max-h-32 overflow-y-auto">
+                            ${signalList.map(s => `<div class="text-xs text-green-300">✓ ${s}</div>`).join('') || 
+                              '<div class="text-xs text-gray-500">No signals available</div>'}
                         </div>
                     </div>
                 `;
             }
             
             if (signals.sell) {
+                const exit = toNum(signals.sell.exit, 0);
+                const signalCount = toNum(signals.sell.signal_count, 0);
+                const reason = signals.sell.reason || 'Unknown';
+                const signalList = signals.sell.signals || [];
+                
                 html += `
                     <div class="bg-red-900 bg-opacity-30 border border-red-600 rounded-lg p-4">
                         <div class="flex items-center justify-between mb-2">
                             <div class="text-red-400 font-bold text-lg">🔴 SELL SIGNAL</div>
-                            <div class="text-red-400 text-sm">${signals.sell.signal_count ? signals.sell.signal_count : '0'}/5</div>
+                            <div class="text-red-400 text-sm">${signalCount}/5</div>
                         </div>
                         <div class="text-sm text-gray-300 mb-2">
-                            Exit: ₹${signals.sell.exit ? signals.sell.exit : '0'} | ${signals.sell.reason ? signals.sell.reason : 'Unknown'}
+                            Exit: ₹${exit.toFixed(2)} | ${reason}
                         </div>
                         <div class="space-y-1">
-                            ${signals.sell.signals && signals.sell.signals.length ? signals.sell.signals.map(s => `
-                                <div class="text-xs text-red-300">✓ ${s}</div>
-                            `).join('') : '<div class="text-xs text-gray-500">No signals available</div>'}
+                            ${signalList.slice(0, 3).map(s => `<div class="text-xs text-red-300">✓ ${s}</div>`).join('') || 
+                              '<div class="text-xs text-gray-500">No signals available</div>'}
                         </div>
                     </div>
                 `;
@@ -409,32 +469,68 @@
             }
             
             container.innerHTML = signalHistory.map(signal => {
-                const isBuy = signal.action === 'BUY';
-                const bgColor = isBuy ? 'bg-green-900 bg-opacity-20 border-green-600' : 'bg-red-900 bg-opacity-20 border-red-600';
+                const isBuy = signal.action === 'BUY' || signal.action === 'STRONG_BUY';
+                const isStrongSignal = signal.action === 'STRONG_BUY';
+                const bgColor = isBuy ? (isStrongSignal ? 'bg-green-900 bg-opacity-30 border-green-400' : 'bg-green-900 bg-opacity-20 border-green-600') : 'bg-red-900 bg-opacity-20 border-red-600';
                 const textColor = isBuy ? 'text-green-400' : 'text-red-400';
+                const symbol = (signal.symbol || 'Unknown').split('|')[1] || signal.symbol;
+                const signalList = signal.signals || [];
+                
+                // Additional data for strong signals
+                const greeks = signal.greeks || {};
+                const gamma = toNum(greeks.gamma, 0);
+                const delta = toNum(greeks.delta, 0);
+                const iv = toNum(greeks.iv, 0);
+                const ofiValue = toNum(signal.ofi, 0);
+                const volumeRatio = toNum(signal.volume_ratio, 0);
+                const totalConditions = toNum(signal.total_conditions, 5);
+                const signalCount = toNum(signal.signal_count, 0);
                 
                 return `
-                    <div class="border ${bgColor} rounded-lg p-4 mb-3">
+                    <div class="border-2 ${bgColor} rounded-lg p-4 mb-3">
                         <div class="flex items-start justify-between">
-                            <div>
+                            <div class="flex-1">
                                 <div class="${textColor} font-bold text-lg">
-                                    ${isBuy ? '🟢 BUY' : '🔴 SELL'} - ${signal.symbol ? signal.symbol.split('|')[1] : 'Unknown'}
+                                    ${isBuy ? (isStrongSignal ? '🔥 STRONG BUY' : '🟢 BUY') : '🔴 SELL'} - ${symbol}
                                 </div>
                                 <div class="text-gray-300 text-sm mt-1">
                                     ${isBuy ?
-                                        `Entry: ₹${signal.entry ? signal.entry : '0'} | Confidence: ${signal.confidence ? (signal.confidence * 100).toFixed(0) : '0'}%` :
-                                        `Exit: ₹${signal.exit ? signal.exit : '0'} | ${signal.reason ? signal.reason : 'Unknown'}`
+                                        `Entry: ₹${toNum(signal.entry, 0).toFixed(2)} | ${signalCount}/${totalConditions} conditions | Confidence: ${(toNum(signal.confidence, 0) * 100).toFixed(0)}%` :
+                                        `Exit: ₹${toNum(signal.exit, 0).toFixed(2)} | ${signal.reason || 'Unknown'}`
                                     }
                                 </div>
+                                ${isStrongSignal && (gamma > 0 || delta > 0 || iv > 0) ? `
+                                <div class="mt-2 grid grid-cols-5 gap-2 text-xs">
+                                    <div class="bg-gray-900 bg-opacity-50 rounded px-2 py-1">
+                                        <span class="text-gray-400">Γ:</span> 
+                                        <span class="font-mono ${gamma > 0.001 ? 'text-yellow-400' : 'text-gray-300'}">${gamma.toFixed(4)}</span>
+                                    </div>
+                                    <div class="bg-gray-900 bg-opacity-50 rounded px-2 py-1">
+                                        <span class="text-gray-400">Δ:</span> 
+                                        <span class="font-mono ${Math.abs(delta) > 0.6 ? 'text-yellow-400' : 'text-gray-300'}">${delta.toFixed(3)}</span>
+                                    </div>
+                                    <div class="bg-gray-900 bg-opacity-50 rounded px-2 py-1">
+                                        <span class="text-gray-400">IV:</span> 
+                                        <span class="font-mono ${iv > 0.2 ? 'text-yellow-400' : 'text-gray-300'}">${(iv * 100).toFixed(1)}%</span>
+                                    </div>
+                                    <div class="bg-gray-900 bg-opacity-50 rounded px-2 py-1">
+                                        <span class="text-gray-400">OFI:</span> 
+                                        <span class="font-mono ${ofiValue > 0.6 ? 'text-green-400' : 'text-gray-300'}">${ofiValue.toFixed(3)}</span>
+                                    </div>
+                                    <div class="bg-gray-900 bg-opacity-50 rounded px-2 py-1">
+                                        <span class="text-gray-400">Vol:</span> 
+                                        <span class="font-mono ${volumeRatio >= 3 ? 'text-red-400' : 'text-gray-300'}">${volumeRatio.toFixed(1)}x</span>
+                                    </div>
+                                </div>
+                                ` : ''}
                                 <div class="mt-2 space-y-1">
-                                    ${signal.signals && signal.signals.length ? signal.signals.slice(0, 3).map(s => `
-                                        <div class="text-xs text-gray-400">• ${s}</div>
-                                    `).join('') : '<div class="text-xs text-gray-500">No signals available</div>'}
+                                    ${signalList.slice(0, 4).map(s => 
+                                        `<div class="text-xs text-gray-400">• ${s}</div>`
+                                    ).join('') || '<div class="text-xs text-gray-500">No signals available</div>'}
+                                    ${signalList.length > 4 ? `<div class="text-xs text-gray-500">+${signalList.length - 4} more signals...</div>` : ''}
                                 </div>
                             </div>
-                            <div class="text-right text-xs text-gray-500">
-                                ${signal.time ? signal.time : 'Unknown'}
-                            </div>
+                            <div class="text-right text-xs text-gray-500 ml-4">${signal.time || 'Unknown'}</div>
                         </div>
                     </div>
                 `;
