@@ -30,8 +30,8 @@ load_dotenv()
 # Configuration
 ACCESS_TOKEN = os.getenv('ACCESS_TOKEN', 'YOUR_ACCESS_TOKEN')
 DEFAULT_INSTRUMENTS = [
-    "NSE_FO|58998",
-    "NSE_FO|59003",
+    "NSE_FO|47680",
+    "NSE_FO|47691",
     
 ]
 
